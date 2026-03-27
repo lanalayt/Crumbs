@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crumbs - Recipe Keeper</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Crumbs">
+  <meta name="theme-color" content="#FF6B6B">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Pacifico&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- ===== LOGIN SCREEN ===== -->
+  <div id="login-screen" class="screen">
+    <div class="login-card">
+      <h1 class="logo">Crumbs</h1>
+      <p class="tagline">Your retro recipe keeper</p>
+      <form id="login-form">
+        <input type="text" id="login-username" placeholder="Username" required autocomplete="username">
+        <input type="password" id="login-password" placeholder="Password" required autocomplete="current-password">
+        <button type="submit" class="btn btn-primary">Sign In</button>
+      </form>
+      <p class="switch-auth">Don't have an account? <a href="#" id="show-register">Sign Up</a></p>
+
+      <form id="register-form" style="display:none">
+        <input type="text" id="reg-username" placeholder="Username" required autocomplete="username">
+        <input type="password" id="reg-password" placeholder="Password" required autocomplete="new-password">
+        <input type="text" id="reg-display" placeholder="Display Name (e.g. Alan & Alana)">
+        <button type="submit" class="btn btn-primary">Create Account</button>
+      </form>
+      <p class="switch-auth" id="show-login-link" style="display:none">Already have an account? <a href="#" id="show-login">Sign In</a></p>
+
+      <div id="auth-error" class="error-msg"></div>
+    </div>
+  </div>
+
+  <!-- ===== MAIN APP ===== -->
+  <div id="app-screen" class="screen" style="display:none">
+
+    <!-- Header -->
+    <header class="diner-header">
+      <div class="header-left">
+        <h1 class="logo">Crumbs</h1>
+      </div>
+      <div class="header-right">
+        <span id="user-greeting" class="greeting"></span>
+        <button id="logout-btn" class="btn btn-small btn-outline">Logout</button>
+      </div>
+    </header>
+
+    <!-- Add Recipe Bar -->
+    <section class="add-recipe-bar">
+      <div class="url-input-group">
+        <input type="url" id="url-input" placeholder="Paste a recipe URL here..." />
+        <button id="scrape-btn" class="btn btn-primary">
+          <span class="btn-text">Grab Recipe</span>
+          <span class="btn-loading" style="display:none">Scraping...</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Filters & Search -->
+    <section class="filters-bar">
+      <div class="search-group">
+        <input type="text" id="search-input" placeholder="Search recipes..." />
+      </div>
+      <div class="filter-group">
+        <select id="filter-meal">
+          <option value="">All Meals</option>
+          <option value="Breakfast">Breakfast</option>
+          <option value="Lunch">Lunch</option>
+          <option value="Dinner">Dinner</option>
+          <option value="Appetizers & Snacks">Appetizers & Snacks</option>
+          <option value="Desserts">Desserts</option>
+          <option value="Soups & Salads">Soups & Salads</option>
+          <option value="Side Dishes">Side Dishes</option>
+          <option value="Drinks & Smoothies">Drinks & Smoothies</option>
+        </select>
+        <select id="filter-cuisine">
+          <option value="">All Cuisines</option>
+          <option value="American">American</option>
+          <option value="Italian">Italian</option>
+          <option value="Mexican">Mexican</option>
+          <option value="Chinese">Chinese</option>
+          <option value="Japanese">Japanese</option>
+          <option value="Indian">Indian</option>
+          <option value="Thai">Thai</option>
+          <option value="Mediterranean">Mediterranean</option>
+          <option value="French">French</option>
+          <option value="Korean">Korean</option>
+          <option value="Filipino">Filipino</option>
+          <option value="Other">Other</option>
+        </select>
+        <select id="sort-order">
+          <option value="alpha-asc">A → Z</option>
+          <option value="alpha-desc">Z → A</option>
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- Recipe Grid -->
+    <main class="recipe-grid" id="recipe-grid">
+      <!-- Cards injected here -->
+    </main>
+
+    <div id="empty-state" class="empty-state" style="display:none">
+      <div class="empty-plate">🍽️</div>
+      <h2>No recipes yet!</h2>
+      <p>Paste a recipe URL above to start your collection.</p>
+    </div>
+  </div>
+
+  <!-- ===== SCRAPE PREVIEW MODAL ===== -->
+  <div id="preview-modal" class="modal-overlay" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Preview Recipe</h2>
+        <button class="modal-close" onclick="closeModal('preview-modal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="preview-image-wrap">
+          <img id="preview-image" src="" alt="Recipe photo" />
+        </div>
+        <label>Title</label>
+        <input type="text" id="preview-title" class="full-width" />
+
+        <div class="two-col">
+          <div>
+            <label>Meal Type</label>
+            <select id="preview-meal">
+              <option value="">Select...</option>
+              <option value="Breakfast">Breakfast</option>
+              <option value="Lunch">Lunch</option>
+              <option value="Dinner">Dinner</option>
+              <option value="Appetizers & Snacks">Appetizers & Snacks</option>
+              <option value="Desserts">Desserts</option>
+              <option value="Soups & Salads">Soups & Salads</option>
+              <option value="Side Dishes">Side Dishes</option>
+              <option value="Drinks & Smoothies">Drinks & Smoothies</option>
+            </select>
+          </div>
+          <div>
+            <label>Cuisine</label>
+            <select id="preview-cuisine">
+              <option value="">Select...</option>
+              <option value="American">American</option>
+              <option value="Italian">Italian</option>
+              <option value="Mexican">Mexican</option>
+              <option value="Chinese">Chinese</option>
+              <option value="Japanese">Japanese</option>
+              <option value="Indian">Indian</option>
+              <option value="Thai">Thai</option>
+              <option value="Mediterranean">Mediterranean</option>
+              <option value="French">French</option>
+              <option value="Korean">Korean</option>
+              <option value="Filipino">Filipino</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <label>Tags</label>
+        <div class="tag-input-wrap" id="preview-tag-input-wrap">
+          <div class="tag-pills" id="preview-tag-pills"></div>
+          <input type="text" id="preview-tag-input" placeholder="Type a tag and press Enter..." />
+        </div>
+
+        <label>Ingredients</label>
+        <textarea id="preview-ingredients" rows="8" placeholder="One ingredient per line"></textarea>
+
+        <label>Instructions</label>
+        <textarea id="preview-instructions" rows="8" placeholder="One step per line"></textarea>
+
+        <label>Tips & Hints</label>
+        <textarea id="preview-tips" rows="3" placeholder="Any extra notes..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal('preview-modal')">Cancel</button>
+        <button class="btn btn-primary" id="save-recipe-btn">Save Recipe</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== VIEW / EDIT RECIPE MODAL ===== -->
+  <div id="recipe-modal" class="modal-overlay" style="display:none">
+    <div class="modal modal-large">
+      <div class="modal-header">
+        <h2 id="recipe-modal-title"></h2>
+        <button class="modal-close" onclick="closeModal('recipe-modal')">&times;</button>
+      </div>
+      <div class="modal-body" id="recipe-modal-body">
+        <!-- Filled dynamically -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger" id="delete-recipe-btn">Delete</button>
+        <button class="btn btn-outline" id="edit-recipe-btn">Edit</button>
+        <button class="btn btn-primary" id="update-recipe-btn" style="display:none">Save Changes</button>
+        <button class="btn btn-outline" id="cancel-edit-btn" style="display:none">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+  </script>
+</body>
+</html>

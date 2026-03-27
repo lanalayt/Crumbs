@@ -1,0 +1,6 @@
+node_modules/
+crumbs.db
+crumbs.db-shm
+crumbs.db-wal
+public/images/recipe_*
+generate-icons.js
