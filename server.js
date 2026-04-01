@@ -21,11 +21,21 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/images', express.static(imageDir));
+// Trust proxy on Render (needed for secure cookies behind HTTPS)
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 app.use(session({
   secret: 'crumbs-secret-recipe-key',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 } // 1 week
+  proxy: process.env.NODE_ENV === 'production',
+  cookie: {
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 1 week
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+  }
 }));
 
 // Auth middleware
