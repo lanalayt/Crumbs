@@ -12,6 +12,7 @@
   "license": "ISC",
   "dependencies": {
     "@sparticuz/chromium": "^143.0.4",
+    "@supabase/supabase-js": "^2.101.1",
     "axios": "1.13.6",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.8.0",

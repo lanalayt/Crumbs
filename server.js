@@ -4,30 +4,25 @@ const bcrypt = require('bcrypt');
 const path = require('path');
 const axios = require('axios');
 const fs = require('fs');
-const db = require('./database');
+const supabase = require('./database');
 const { scrapeRecipe } = require('./scraper');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Image storage: persistent disk on Render, local otherwise
-const imageDir = process.env.NODE_ENV === 'production' && fs.existsSync('/data')
-  ? '/data/images'
-  : path.join(__dirname, 'public/images');
-if (!fs.existsSync(imageDir)) fs.mkdirSync(imageDir, { recursive: true });
-
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/images', express.static(imageDir));
+app.use('/images', express.static(path.join(__dirname, 'public/images')));
+
 // Trust proxy on Render (needed for secure cookies behind HTTPS)
 if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
 
 app.use(session({
-  secret: 'crumbs-secret-recipe-key',
+  secret: process.env.SESSION_SECRET || 'crumbs-secret-recipe-key',
   resave: false,
   saveUninitialized: false,
   proxy: process.env.NODE_ENV === 'production',
@@ -46,9 +41,14 @@ function requireAuth(req, res, next) {
 
 // ============ AUTH ROUTES ============
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('username', username)
+    .single();
+
   if (!user || !bcrypt.compareSync(password, user.password)) {
     return res.status(401).json({ error: 'Invalid username or password' });
   }
@@ -57,22 +57,32 @@ app.post('/api/login', (req, res) => {
   res.json({ ok: true, displayName: user.display_name });
 });
 
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { username, password, displayName } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required' });
   }
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .eq('username', username)
+    .single();
+
   if (existing) {
     return res.status(409).json({ error: 'Username already taken' });
   }
   const hash = bcrypt.hashSync(password, 10);
-  const result = db.prepare('INSERT INTO users (username, password, display_name) VALUES (?, ?, ?)').run(
-    username, hash, displayName || username
-  );
-  req.session.userId = result.lastInsertRowid;
-  req.session.displayName = displayName || username;
-  res.json({ ok: true, displayName: displayName || username });
+  const { data: newUser, error } = await supabase
+    .from('users')
+    .insert({ username, password: hash, display_name: displayName || username })
+    .select('id, display_name')
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  req.session.userId = newUser.id;
+  req.session.displayName = newUser.display_name;
+  res.json({ ok: true, displayName: newUser.display_name });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -90,19 +100,19 @@ app.get('/api/me', (req, res) => {
 
 // ============ CUSTOM CUISINES ============
 
-app.get('/api/cuisines', requireAuth, (req, res) => {
-  const rows = db.prepare('SELECT name FROM custom_cuisines ORDER BY name COLLATE NOCASE ASC').all();
-  res.json(rows.map(r => r.name));
+app.get('/api/cuisines', requireAuth, async (req, res) => {
+  const { data } = await supabase
+    .from('custom_cuisines')
+    .select('name')
+    .order('name', { ascending: true });
+  res.json((data || []).map(r => r.name));
 });
 
-app.post('/api/cuisines', requireAuth, (req, res) => {
+app.post('/api/cuisines', requireAuth, async (req, res) => {
   const { name } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   const val = name.trim();
-  const existing = db.prepare('SELECT id FROM custom_cuisines WHERE name = ?').get(val);
-  if (!existing) {
-    db.prepare('INSERT INTO custom_cuisines (name) VALUES (?)').run(val);
-  }
+  await supabase.from('custom_cuisines').upsert({ name: val }, { onConflict: 'name' });
   res.json({ ok: true });
 });
 
@@ -127,100 +137,100 @@ app.post('/api/recipes', requireAuth, async (req, res) => {
   const { title, sourceUrl, imageUrl, mealType, cuisineType, ingredients, instructions, tips, tags } = req.body;
   if (!title) return res.status(400).json({ error: 'Title is required' });
 
-  // Download image locally if we have a URL
-  let localImage = null;
-  if (imageUrl) {
-    try {
-      const response = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 10000 });
-      const ext = (response.headers['content-type'] || 'image/jpeg').includes('png') ? '.png' : '.jpg';
-      const filename = `recipe_${Date.now()}${ext}`;
-      fs.writeFileSync(path.join(imageDir, filename), response.data);
-      localImage = filename;
-    } catch (e) {
-      console.error('Image download failed:', e.message);
-    }
-  }
+  const { data, error } = await supabase
+    .from('recipes')
+    .insert({
+      user_id: req.session.userId,
+      title,
+      source_url: sourceUrl || null,
+      image_url: imageUrl || null,
+      local_image: null,
+      meal_type: mealType || null,
+      cuisine_type: cuisineType || null,
+      ingredients: ingredients || [],
+      instructions: instructions || [],
+      tips: tips || '',
+      tags: tags || [],
+    })
+    .select('id')
+    .single();
 
-  const result = db.prepare(`
-    INSERT INTO recipes (user_id, title, source_url, image_url, local_image, meal_type, cuisine_type, ingredients, instructions, tips, tags)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    req.session.userId,
-    title,
-    sourceUrl || null,
-    imageUrl || null,
-    localImage,
-    mealType || null,
-    cuisineType || null,
-    JSON.stringify(ingredients || []),
-    JSON.stringify(instructions || []),
-    tips || '',
-    JSON.stringify(tags || [])
-  );
-
-  res.json({ ok: true, id: result.lastInsertRowid });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, id: data.id });
 });
 
 // Get all recipes for the logged-in user
-app.get('/api/recipes', requireAuth, (req, res) => {
-  const recipes = db.prepare(`
-    SELECT id, title, local_image, image_url, meal_type, cuisine_type, tags, created_at
-    FROM recipes WHERE user_id = ?
-    ORDER BY title COLLATE NOCASE ASC
-  `).all(req.session.userId);
-  res.json(recipes);
+app.get('/api/recipes', requireAuth, async (req, res) => {
+  const { data } = await supabase
+    .from('recipes')
+    .select('id, title, image_url, meal_type, cuisine_type, tags, created_at')
+    .eq('user_id', req.session.userId)
+    .order('title', { ascending: true });
+  res.json(data || []);
 });
 
 // Get single recipe
-app.get('/api/recipes/:id', requireAuth, (req, res) => {
-  const recipe = db.prepare('SELECT * FROM recipes WHERE id = ? AND user_id = ?').get(
-    req.params.id, req.session.userId
-  );
-  if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
+app.get('/api/recipes/:id', requireAuth, async (req, res) => {
+  const { data: recipe } = await supabase
+    .from('recipes')
+    .select('*')
+    .eq('id', req.params.id)
+    .eq('user_id', req.session.userId)
+    .single();
 
-  recipe.ingredients = JSON.parse(recipe.ingredients || '[]');
-  recipe.instructions = JSON.parse(recipe.instructions || '[]');
-  recipe.tags = JSON.parse(recipe.tags || '[]');
+  if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
   res.json(recipe);
 });
 
 // Update recipe
-app.put('/api/recipes/:id', requireAuth, (req, res) => {
+app.put('/api/recipes/:id', requireAuth, async (req, res) => {
   const { title, mealType, cuisineType, ingredients, instructions, tips, tags } = req.body;
-  const existing = db.prepare('SELECT id FROM recipes WHERE id = ? AND user_id = ?').get(
-    req.params.id, req.session.userId
-  );
+
+  const { data: existing } = await supabase
+    .from('recipes')
+    .select('id')
+    .eq('id', req.params.id)
+    .eq('user_id', req.session.userId)
+    .single();
+
   if (!existing) return res.status(404).json({ error: 'Recipe not found' });
 
-  db.prepare(`
-    UPDATE recipes SET title = ?, meal_type = ?, cuisine_type = ?, ingredients = ?, instructions = ?, tips = ?, tags = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? AND user_id = ?
-  `).run(
-    title, mealType || null, cuisineType || null,
-    JSON.stringify(ingredients || []),
-    JSON.stringify(instructions || []),
-    tips || '',
-    JSON.stringify(tags || []),
-    req.params.id, req.session.userId
-  );
+  const { error } = await supabase
+    .from('recipes')
+    .update({
+      title,
+      meal_type: mealType || null,
+      cuisine_type: cuisineType || null,
+      ingredients: ingredients || [],
+      instructions: instructions || [],
+      tips: tips || '',
+      tags: tags || [],
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', req.params.id)
+    .eq('user_id', req.session.userId);
 
+  if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
 
 // Delete recipe
-app.delete('/api/recipes/:id', requireAuth, (req, res) => {
-  const recipe = db.prepare('SELECT local_image FROM recipes WHERE id = ? AND user_id = ?').get(
-    req.params.id, req.session.userId
-  );
+app.delete('/api/recipes/:id', requireAuth, async (req, res) => {
+  const { data: recipe } = await supabase
+    .from('recipes')
+    .select('id')
+    .eq('id', req.params.id)
+    .eq('user_id', req.session.userId)
+    .single();
+
   if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
 
-  // Clean up local image
-  if (recipe.local_image) {
-    const imgPath = path.join(imageDir, recipe.local_image);
-    if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
-  }
+  await supabase
+    .from('recipes')
+    .delete()
+    .eq('id', req.params.id)
+    .eq('user_id', req.session.userId);
 
-  db.prepare('DELETE FROM recipes WHERE id = ? AND user_id = ?').run(req.params.id, req.session.userId);
   res.json({ ok: true });
 });
 
