@@ -10,53 +10,45 @@ const isProduction = process.env.NODE_ENV === 'production';
 async function scrapeRecipe(url) {
   let html;
 
-  // Try simple HTTP request first
-  try {
-    const { data } = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Cache-Control': 'no-cache',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Upgrade-Insecure-Requests': '1',
-      },
-      timeout: 15000,
-    });
-    html = data;
-  } catch (err) {
-    console.log('Axios failed, falling back to Puppeteer:', err.message);
-    html = null;
+  // Try multiple HTTP approaches before falling back to Puppeteer
+  const userAgents = [
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
+  ];
+
+  for (const ua of userAgents) {
+    if (html) break;
+    try {
+      const { data } = await axios.get(url, {
+        headers: {
+          'User-Agent': ua,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate',
+          'Cache-Control': 'no-cache',
+        },
+        timeout: 12000,
+        maxRedirects: 5,
+      });
+      html = data;
+    } catch (err) {
+      console.log(`Axios failed with UA [${ua.slice(0, 30)}...]:`, err.message);
+    }
   }
 
-  // Fallback: use a real browser via Puppeteer
-  if (!html) {
+  // Fallback: use Puppeteer (only locally — too heavy for Render free tier)
+  if (!html && !isProduction) {
     let browser;
     try {
-      if (isProduction) {
-        const chromium = require('@sparticuz/chromium');
-        const puppeteerCore = require('puppeteer-core');
-        browser = await puppeteerCore.launch({
-          args: chromium.args,
-          defaultViewport: chromium.defaultViewport,
-          executablePath: await chromium.executablePath(),
-          headless: chromium.headless,
-        });
-      } else {
-        const puppeteer = require('puppeteer');
-        browser = await puppeteer.launch({
-          headless: 'new',
-          args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        });
-      }
+      const puppeteer = require('puppeteer');
+      browser = await puppeteer.launch({
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
       const page = await browser.newPage();
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+      await page.setUserAgent(userAgents[0]);
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      // Give JS a moment to render content
       await new Promise(r => setTimeout(r, 3000));
       html = await page.content();
     } finally {
