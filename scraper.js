@@ -51,6 +51,8 @@ async function scrapeRecipe(url) {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await new Promise(r => setTimeout(r, 3000));
       html = await page.content();
+    } catch (e) {
+      console.log('Puppeteer fallback failed:', e.message);
     } finally {
       if (browser) await browser.close();
     }
